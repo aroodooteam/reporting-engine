@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# -*- encoding: utf-8 -*-
 ##############################################################################
 #
 #    OpenERP, Open Source Management Solution
@@ -20,6 +20,9 @@
 #
 ##############################################################################
 
+import xlwt
+import xlsxwriter
+from xlwt.Style import default_style
 import cStringIO
 from datetime import datetime
 from openerp.osv.fields import datetime as datetime_field
@@ -29,30 +32,7 @@ from types import CodeType
 from openerp.report.report_sxw import report_sxw
 from openerp import pooler
 import logging
-
 _logger = logging.getLogger(__name__)
-
-xls_types_default = {
-    'bool': False,
-    'date': None,
-    'text': '',
-    'number': 0,
-}
-
-try:
-    import xlwt
-    from xlwt.Style import default_style
-
-    xls_types = {
-        'bool': xlwt.Row.set_cell_boolean,
-        'date': xlwt.Row.set_cell_date,
-        'text': xlwt.Row.set_cell_text,
-        'number': xlwt.Row.set_cell_number,
-    }
-except ImportError:  # pragma: no cover
-    _logger.debug("Cannot import xlwt. This module will not be functional.")
-    xls_types = xls_types_default
-    default_style = None
 
 
 class AttrDict(dict):
@@ -62,7 +42,26 @@ class AttrDict(dict):
 
 
 class report_xls(report_sxw):
+
+    xls_types = {
+        'bool': xlwt.Row.set_cell_boolean,
+        'date': xlwt.Row.set_cell_date,
+        'text': xlwt.Row.set_cell_text,
+        'number': xlwt.Row.set_cell_number,
+	#
+	#
+	#
+	#
+    }
+    xls_types_default = {
+        'bool': False,
+        'date': None,
+        'text': '',
+        'number': 0,
+    }
+
     # TO DO: move parameters infra to configurable data
+
     # header/footer
     hf_params = {
         'font_size': 8,
@@ -129,6 +128,7 @@ class report_xls(report_sxw):
         # prevent style make error
         # http://stackoverflow.com/questions/17130516/xlwt-set-style-making-error-more-than-4094-xfs-styles
         wb = xlwt.Workbook(encoding='utf-8', style_compression=2)
+        wb = xlsxwriter.Workbook(n, {'constant_memory': True})
         _p = AttrDict(parser_instance.localcontext)
         _xs = self.xls_styles
         self.xls_headers = {
@@ -144,9 +144,10 @@ class report_xls(report_sxw):
                 ) % self.hf_params,
         }
         self.generate_xls_report(_p, _xs, data, objs, wb)
-        wb.save(n)
+#        wb.save(n)
+        wb.close()
         n.seek(0)
-        return (n.read(), 'xls')
+        return (n.read(), 'xlsx')
 
     def render(self, wanted, col_specs, rowtype, render_space='empty'):
         """
@@ -168,8 +169,7 @@ class report_xls(report_sxw):
         row = col_specs[wanted][rowtype][:]
         for i in range(len(row)):
             if isinstance(row[i], CodeType):
-                # TODO Use safe_eval or document why not and remove pylint hack
-                row[i] = eval(row[i], render_space)  # pylint: disable=W0123
+                row[i] = eval(row[i], render_space)
         row.insert(0, wanted)
         return row
 
@@ -208,7 +208,7 @@ class report_xls(report_sxw):
                         c.append({'formula': s[5]})
                     else:
                         c.append({
-                            'write_cell_func': xls_types[c[3]]})
+                            'write_cell_func': report_xls.xls_types[c[3]]})
                     # Set custom cell style
                     if s_len > 6 and s[6] is not None:
                         c.append(s[6])
@@ -228,28 +228,32 @@ class report_xls(report_sxw):
         return r
 
     def xls_write_row(self, ws, row_pos, row_data,
-                      row_style=default_style, set_column_size=False):
-        r = ws.row(row_pos)
+                      row_style={}, set_column_size=False):
+#        r = ws.row(row_pos)
+        r=row_pos
         for col, size, spec in row_data:
             data = spec[4]
             formula = spec[5].get('formula') and \
-                xlwt.Formula(spec[5]['formula']) or None
+                '='+(spec[5]['formula']) or None
             style = spec[6] and spec[6] or row_style
             if not data:
                 # if no data, use default values
-                data = xls_types_default[spec[3]]
+                data = report_xls.xls_types_default[spec[3]]
             if size != 1:
                 if formula:
-                    ws.write_merge(
-                        row_pos, row_pos, col, col + size - 1, data, style)
+                    ws.merge_range(row_pos,col,row_pos,col + size - 1,data, style)
                 else:
-                    ws.write_merge(
-                        row_pos, row_pos, col, col + size - 1, data, style)
+                    ws.merge_range(row_pos,col,row_pos,col + size - 1,data, style)
             else:
                 if formula:
                     ws.write(row_pos, col, formula, style)
                 else:
-                    spec[5]['write_cell_func'](r, col, data, style)
+                    ws.write(r, col, data, style)
+                    #spec[5]['write_cell_func'](r, col, data, style)
             if set_column_size:
-                ws.col(col).width = spec[2] * 256
+                ws.set_column(col, col,spec[2] * 256 )
+                #ws.col(col).width = spec[2] * 256
         return row_pos + 1
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+
